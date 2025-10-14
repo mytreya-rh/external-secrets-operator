@@ -23,6 +23,10 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"strconv"
+	"time"
+
+	"github.com/openshift/external-secrets-operator/pkg/controller/common"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -103,6 +107,14 @@ func main() {
 		"Secret name containing the certificates for the metrics server which should be present in operator namespace. "+
 			"If not provided self-signed certificates will be used")
 	flag.Parse()
+
+	defaultPeriodicReconcileTime := os.Getenv("DEFAULT_PERIODIC_RECONCILE_TIME")
+	if len(defaultPeriodicReconcileTime) > 0 {
+		period, err := strconv.Atoi(defaultPeriodicReconcileTime)
+		if err == nil && period > 0 {
+			common.DefaultPeriodicReconcileTime = time.Duration(period) * time.Second
+		}
+	}
 
 	logConfig := textlogger.NewConfig(textlogger.Verbosity(logLevel))
 	ctrl.SetLogger(textlogger.NewLogger(logConfig))
