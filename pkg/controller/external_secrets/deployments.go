@@ -404,12 +404,12 @@ func updateSecretVolumeConfig(deployment *appsv1.Deployment, volumeName, secretN
 	for i := range deployment.Spec.Template.Spec.Volumes {
 		if deployment.Spec.Template.Spec.Volumes[i].Name == volumeName {
 			volumeExists = true
+			break
 		}
 		if deployment.Spec.Template.Spec.Volumes[i].Secret == nil {
 			deployment.Spec.Template.Spec.Volumes[i].Secret = &corev1.SecretVolumeSource{}
 		}
 		deployment.Spec.Template.Spec.Volumes[i].Secret.SecretName = secretName
-		break
 	}
 
 	if !volumeExists {

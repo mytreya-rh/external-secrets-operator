@@ -9,6 +9,9 @@ const (
 	// DefaultRequeueTime is the default reconcile requeue time.
 	DefaultRequeueTime = time.Second * 30
 
+	// DefaultPeriodicReconcileTime is the default periodic reconcile time.
+	DefaultPeriodicReconcileTime = time.Second * 300
+
 	// ExternalSecretsConfigObjectName is the default name of the externalsecretsconfigs.operator.openshift.io CR.
 	ExternalSecretsConfigObjectName = "cluster"
 

@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"time"
 
 	webhook "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
@@ -335,8 +336,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 			// NotFound errors, since they can't be fixed by an immediate
 			// requeue (have to wait for a new notification), and can be processed
 			// on deleted requests.
-			r.log.V(1).Info("externalsecretsconfigs.operator.openshift.io object not found, skipping reconciliation", "request", req)
-			return ctrl.Result{}, nil
+			r.log.V(1).Info("externalsecretsconfigs.operator.openshift.io object not found, requeuing after periodic reconcile time", "request", req, "periodic reconcile time", common.DefaultPeriodicReconcileTime)
+			return ctrl.Result{RequeueAfter: common.DefaultPeriodicReconcileTime}, nil
 		}
 		return ctrl.Result{}, fmt.Errorf("failed to fetch externalsecretsconfigs.operator.openshift.io %q during reconciliation: %w", req.NamespacedName, err)
 	}
@@ -419,7 +420,8 @@ func (r *Reconciler) processReconcileRequest(esc *operatorv1alpha1.ExternalSecre
 		}
 
 		if isFatal {
-			return ctrl.Result{}, nil
+			r.log.V(1).Info("reconciliation failed with irrecoverable error, requeuing after periodic reconcile time", "request", req, "periodic reconcile time", time.Duration(esc.Spec.ControllerConfig.PeriodicReconcileInterval)*time.Second)
+			return ctrl.Result{RequeueAfter: time.Duration(esc.Spec.ControllerConfig.PeriodicReconcileInterval) * time.Second}, nil
 		}
 		return ctrl.Result{RequeueAfter: common.DefaultRequeueTime}, fmt.Errorf("failed to reconcile %q external-secrets deployment: %w", req, err)
 	}
@@ -444,7 +446,8 @@ func (r *Reconciler) processReconcileRequest(esc *operatorv1alpha1.ExternalSecre
 		errUpdate = r.updateCondition(esc, nil)
 	}
 
-	return ctrl.Result{}, errUpdate
+	r.log.V(1).Info("reconciliation successful, requeuing after periodic reconcile time", "request", req, "periodic reconcile time", time.Duration(esc.Spec.ControllerConfig.PeriodicReconcileInterval)*time.Second)
+	return ctrl.Result{RequeueAfter: time.Duration(esc.Spec.ControllerConfig.PeriodicReconcileInterval) * time.Second}, errUpdate
 }
 
 // cleanUp handles deletion of externalsecretsconfigs.operator.openshift.io gracefully.
