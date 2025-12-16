@@ -91,6 +91,7 @@ type Reconciler struct {
 	log                   logr.Logger
 	esm                   *operatorv1alpha1.ExternalSecretsManager
 	optionalResourcesList map[string]struct{}
+	deploymentCache       map[string]*appsv1.Deployment // Cache for normalized deployment specs from API server
 }
 
 // +kubebuilder:rbac:groups=operator.openshift.io,resources=externalsecretsconfigs,verbs=get;list;watch;create;update
@@ -126,6 +127,7 @@ func New(ctx context.Context, mgr ctrl.Manager) (*Reconciler, error) {
 		Scheme:                mgr.GetScheme(),
 		esm:                   new(operatorv1alpha1.ExternalSecretsManager),
 		optionalResourcesList: make(map[string]struct{}),
+		deploymentCache:       make(map[string]*appsv1.Deployment),
 	}
 
 	// Check if cert-manager is installed and register Certificate informer if present
@@ -254,7 +256,7 @@ func checkAndRegisterCertificates(mgr ctrl.Manager, r *Reconciler) (bool, error)
 // SetupWithManager is for creating a controller instance with predicates and event filters.
 func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 	mapFunc := func(ctx context.Context, obj client.Object) []reconcile.Request {
-		r.log.V(4).Info("received reconcile event", "object", fmt.Sprintf("%T", obj), "name", obj.GetName(), "namespace", obj.GetNamespace())
+		r.log.V(1).Info("received reconcile event", "object", fmt.Sprintf("%T", obj), "name", obj.GetName(), "namespace", obj.GetNamespace())
 
 		objLabels := obj.GetLabels()
 		if objLabels != nil {
@@ -268,12 +270,13 @@ func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 				}
 			}
 		}
-		r.log.V(4).Info("object not of interest, ignoring reconcile event", "object", fmt.Sprintf("%T", obj), "name", obj.GetName(), "namespace", obj.GetNamespace())
+		r.log.V(1).Info("object not of interest, ignoring reconcile event", "object", fmt.Sprintf("%T", obj), "name", obj.GetName(), "namespace", obj.GetNamespace())
 		return []reconcile.Request{}
 	}
 
 	// predicate function to ignore events for objects not managed by controller.
 	managedResources := predicate.NewPredicateFuncs(func(object client.Object) bool {
+		r.log.V(1).Info("predicate check", "object", fmt.Sprintf("%T", object), "name", object.GetName(), "namespace", object.GetNamespace())
 		return object.GetLabels() != nil && object.GetLabels()[requestEnqueueLabelKey] == requestEnqueueLabelValue
 	})
 
@@ -346,7 +349,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 			// requeue (have to wait for a new notification), and can be processed
 			// on deleted requests.
 			r.log.V(1).Info("externalsecretsconfigs.operator.openshift.io object not found, skipping reconciliation", "request", req)
-			return ctrl.Result{}, nil
+			fmt.Println("externalsecretsconfigs.operator.openshift.io object not found, MYT-2 requeuing")
+			return ctrl.Result{RequeueAfter: common.DefaultPeriodicReconcileTime}, nil
 		}
 		return ctrl.Result{}, fmt.Errorf("failed to fetch externalsecretsconfigs.operator.openshift.io %q during reconciliation: %w", req.NamespacedName, err)
 	}
@@ -454,7 +458,9 @@ func (r *Reconciler) processReconcileRequest(esc *operatorv1alpha1.ExternalSecre
 		errUpdate = r.updateCondition(esc, nil)
 	}
 
-	return ctrl.Result{}, errUpdate
+	fmt.Println("externalsecretsconfigs.operator.openshift.io reconciliation MYT-2 successful, requeuing")
+	return ctrl.Result{RequeueAfter: common.DefaultRequeueTime}, errUpdate
+	//return ctrl.Result{}, errUpdate
 }
 
 // cleanUp handles deletion of externalsecretsconfigs.operator.openshift.io gracefully.

@@ -13,8 +13,10 @@ import (
 	corevalidation "k8s.io/kubernetes/pkg/apis/core/validation"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	operatorv1alpha1 "github.com/openshift/external-secrets-operator/api/v1alpha1"
+	operatorclient "github.com/openshift/external-secrets-operator/pkg/controller/client"
 	"github.com/openshift/external-secrets-operator/pkg/controller/common"
 	"github.com/openshift/external-secrets-operator/pkg/operator/assets"
 )
@@ -71,27 +73,59 @@ func (r *Reconciler) createOrApplyDeploymentFromAsset(esc *operatorv1alpha1.Exte
 	}
 
 	deploymentName := fmt.Sprintf("%s/%s", deployment.GetNamespace(), deployment.GetName())
-	fetched := &appsv1.Deployment{}
-	exist, err := r.Exists(r.ctx, client.ObjectKeyFromObject(deployment), fetched)
-	if err != nil {
-		return common.FromClientError(err, "failed to check %s deployment resource already exists", deploymentName)
+	cacheKey := deploymentName
+
+	// Type assert to access the underlying client.Client from CtrlClientImpl
+	ctrlClientImpl, ok := r.CtrlClient.(*operatorclient.CtrlClientImpl)
+	if !ok {
+		return fmt.Errorf("failed to type assert CtrlClient to CtrlClientImpl")
 	}
-	if exist && externalSecretsConfigCreateRecon {
-		r.eventRecorder.Eventf(esc, corev1.EventTypeWarning, "ResourceAlreadyExists", "%s deployment resource already exists", deploymentName)
-	}
-	if exist && common.HasObjectChanged(deployment, fetched) {
-		r.log.V(1).Info("deployment has been modified, updating to desired state", "name", deploymentName)
-		if err := r.UpdateWithRetry(r.ctx, deployment); err != nil {
-			return common.FromClientError(err, "failed to update %s deployment resource", deploymentName)
-		}
-		r.eventRecorder.Eventf(esc, corev1.EventTypeNormal, "Reconciled", "deployment resource %s updated", deploymentName)
-	} else if !exist {
-		if err := r.Create(r.ctx, deployment); err != nil {
-			return common.FromClientError(err, "failed to create %s deployment resource", deploymentName)
-		}
-		r.eventRecorder.Eventf(esc, corev1.EventTypeNormal, "Reconciled", "deployment resource %s created", deploymentName)
+
+	// Check if we have a cached version of this deployment
+	cachedDeployment, hasCached := r.deploymentCache[cacheKey]
+
+	// If we have a cached version, use it as the base to avoid unnecessary updates
+	var deploymentToUpdate *appsv1.Deployment
+	if hasCached {
+		// Use the cached deployment as the base
+		deploymentToUpdate = cachedDeployment.DeepCopy()
+		// Apply our desired spec to the cached deployment
+		r.mergeDesiredDeploymentSpec(deploymentToUpdate, deployment)
 	} else {
-		r.log.V(4).Info("deployment resource already exists and is in expected state", "name", deploymentName)
+		// First time or no cache, use the deployment as-is
+		deploymentToUpdate = deployment
+	}
+
+	result, err := controllerutil.CreateOrUpdate(r.ctx, ctrlClientImpl.Client, deploymentToUpdate, func() error {
+		// If we have a cached version, merge the desired spec into the current object
+		if hasCached {
+			r.mergeDesiredDeploymentSpec(deploymentToUpdate, deployment)
+		}
+		return nil
+	})
+	if err != nil {
+		return common.FromClientError(err, "failed to create or update %s deployment resource", deploymentName)
+	}
+
+	switch result {
+	case controllerutil.OperationResultCreated:
+		r.log.V(1).Info("deployment created via API server", "name", deploymentName)
+		r.eventRecorder.Eventf(esc, corev1.EventTypeNormal, "Reconciled", "deployment resource %s created", deploymentName)
+		// Cache the normalized deployment using dry-run
+		if err := r.updateDeploymentCache(ctrlClientImpl.Client, deployment, cacheKey); err != nil {
+			r.log.V(1).Info("failed to update deployment cache after creation", "name", deploymentName, "error", err)
+		}
+	case controllerutil.OperationResultUpdated:
+		r.log.V(1).Info("deployment updated via API server", "name", deploymentName)
+		r.eventRecorder.Eventf(esc, corev1.EventTypeNormal, "Reconciled", "deployment resource %s updated", deploymentName)
+		// Update cache with normalized spec from dry-run to prevent future unnecessary updates
+		if err := r.updateDeploymentCache(ctrlClientImpl.Client, deployment, cacheKey); err != nil {
+			r.log.V(1).Info("failed to update deployment cache after update", "name", deploymentName, "error", err)
+		}
+	case controllerutil.OperationResultNone:
+		r.log.V(1).Info("deployment unchanged, no API server call made", "name", deploymentName)
+	default:
+		r.log.V(1).Info("deployment operation completed", "name", deploymentName, "result", result)
 	}
 
 	return nil
@@ -659,4 +693,70 @@ func (r *Reconciler) removeTrustedCAVolumeMount(container *corev1.Container) {
 		}
 	}
 	container.VolumeMounts = filteredVolumeMounts
+}
+
+// updateDeploymentCache performs a dry-run create/update to get the normalized deployment spec
+// from the API server and caches it to avoid unnecessary updates in future reconciliations.
+func (r *Reconciler) updateDeploymentCache(c client.Client, deployment *appsv1.Deployment, cacheKey string) error {
+	// Create a copy for the dry-run
+	dryRunDeployment := deployment.DeepCopy()
+
+	// Perform a dry-run update to get the normalized spec with all defaults from API server
+	// This ensures our cached version matches exactly what the API server would store
+	err := c.Patch(r.ctx, dryRunDeployment, client.Apply,
+		client.DryRunAll,
+		client.ForceOwnership,
+		client.FieldOwner("external-secrets-operator"))
+
+	if err != nil {
+		// If patch fails, try to get the existing deployment as fallback
+		existingDeployment := &appsv1.Deployment{}
+		getErr := c.Get(r.ctx, client.ObjectKey{
+			Namespace: deployment.GetNamespace(),
+			Name:      deployment.GetName(),
+		}, existingDeployment)
+		if getErr != nil {
+			return fmt.Errorf("failed to perform dry-run and get deployment: patch error: %w, get error: %w", err, getErr)
+		}
+		r.deploymentCache[cacheKey] = existingDeployment.DeepCopy()
+		r.log.V(1).Info("cached existing deployment after dry-run failed", "key", cacheKey)
+		return nil
+	}
+
+	// Cache the normalized deployment
+	r.deploymentCache[cacheKey] = dryRunDeployment
+	r.log.V(1).Info("cached normalized deployment from dry-run", "key", cacheKey)
+	return nil
+}
+
+// mergeDesiredDeploymentSpec merges the desired deployment spec into the target deployment.
+// This preserves API server defaults while applying our desired configuration.
+func (r *Reconciler) mergeDesiredDeploymentSpec(target, desired *appsv1.Deployment) {
+	// Update metadata labels (but preserve other metadata like resourceVersion)
+	if target.Labels == nil {
+		target.Labels = make(map[string]string)
+	}
+	for k, v := range desired.Labels {
+		target.Labels[k] = v
+	}
+
+	// Update spec - this is where the actual configuration lives
+	target.Spec.Replicas = desired.Spec.Replicas
+	target.Spec.Selector = desired.Spec.Selector
+
+	// Update pod template metadata
+	if target.Spec.Template.Labels == nil {
+		target.Spec.Template.Labels = make(map[string]string)
+	}
+	for k, v := range desired.Spec.Template.Labels {
+		target.Spec.Template.Labels[k] = v
+	}
+
+	// Update pod spec - containers, volumes, security context, etc.
+	target.Spec.Template.Spec = desired.Spec.Template.Spec
+
+	// Update strategy if specified
+	if desired.Spec.Strategy.Type != "" {
+		target.Spec.Strategy = desired.Spec.Strategy
+	}
 }

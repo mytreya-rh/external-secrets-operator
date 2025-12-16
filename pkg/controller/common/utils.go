@@ -159,6 +159,11 @@ func DecodeNetworkPolicyObjBytes(objBytes []byte) *networkingv1.NetworkPolicy {
 	return obj.(*networkingv1.NetworkPolicy)
 }
 
+// DeploymentSpecModified checks if a deployment has been modified using type-safe comparison
+func DeploymentSpecModified(desired, fetched *appsv1.Deployment) bool {
+	return deploymentSpecModified(desired, fetched) || ObjectMetadataModified(desired, fetched)
+}
+
 func HasObjectChanged(desired, fetched client.Object) bool {
 	if reflect.TypeOf(desired) != reflect.TypeOf(fetched) {
 		panic("both objects to be compared must be of same type")
