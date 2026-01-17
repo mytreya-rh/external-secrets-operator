@@ -19,6 +19,11 @@ import (
 	"github.com/openshift/external-secrets-operator/pkg/controller/commontest"
 )
 
+const (
+	testAffinityValue               = "test"
+	bitwardenSDKServerContainerName = "bitwarden-sdk-server"
+)
+
 // Helper function to create an ExistsCalls mock that returns false
 func doesNotExist() func(context.Context, types.NamespacedName, client.Object) (bool, error) {
 	return func(ctx context.Context, ns types.NamespacedName, obj client.Object) (bool, error) {
@@ -86,16 +91,14 @@ func TestCreateOrApplyDeployments(t *testing.T) {
 			name: "deployment reconciliation successful",
 			preReq: func(r *Reconciler, m *fakes.FakeCtrlClient, capturedDeployment **appsv1.Deployment) {
 				m.ExistsCalls(func(ctx context.Context, ns types.NamespacedName, obj client.Object) (bool, error) {
-					switch o := obj.(type) {
-					case *appsv1.Deployment:
+					if o, ok := obj.(*appsv1.Deployment); ok {
 						deployment := testDeployment(controllerDeploymentAssetName)
 						deployment.DeepCopyInto(o)
 					}
 					return true, nil
 				})
 				m.UpdateWithRetryCalls(func(ctx context.Context, obj client.Object, _ ...client.UpdateOption) error {
-					switch o := obj.(type) {
-					case *appsv1.Deployment:
+					if o, ok := obj.(*appsv1.Deployment); ok {
 						*capturedDeployment = o.DeepCopy()
 					}
 					return nil
@@ -118,7 +121,7 @@ func TestCreateOrApplyDeployments(t *testing.T) {
 					}
 				}
 				// Validate labels are preserved
-				if deployment.Labels == nil || len(deployment.Labels) == 0 {
+				if len(deployment.Labels) == 0 {
 					t.Error("deployment should have labels")
 				}
 			},
@@ -127,8 +130,7 @@ func TestCreateOrApplyDeployments(t *testing.T) {
 			name: "deployment reconciliation fails as image env var is empty",
 			preReq: func(r *Reconciler, m *fakes.FakeCtrlClient, capturedDeployment **appsv1.Deployment) {
 				m.ExistsCalls(func(ctx context.Context, ns types.NamespacedName, obj client.Object) (bool, error) {
-					switch o := obj.(type) {
-					case *appsv1.Deployment:
+					if o, ok := obj.(*appsv1.Deployment); ok {
 						deployment := testDeployment(controllerDeploymentAssetName)
 						deployment.DeepCopyInto(o)
 					}
@@ -142,9 +144,8 @@ func TestCreateOrApplyDeployments(t *testing.T) {
 			name: "deployment reconciliation fails while checking if exists",
 			preReq: func(r *Reconciler, m *fakes.FakeCtrlClient, capturedDeployment **appsv1.Deployment) {
 				m.ExistsCalls(func(ctx context.Context, ns types.NamespacedName, obj client.Object) (bool, error) {
-					switch obj.(type) {
-					case *appsv1.Deployment:
-						return false, commontest.TestClientError
+					if _, ok := obj.(*appsv1.Deployment); ok {
+						return false, commontest.ErrTestClient
 					}
 					return true, nil
 				})
@@ -155,8 +156,7 @@ func TestCreateOrApplyDeployments(t *testing.T) {
 			name: "deployment reconciliation failed while restoring to desired state",
 			preReq: func(r *Reconciler, m *fakes.FakeCtrlClient, capturedDeployment **appsv1.Deployment) {
 				m.ExistsCalls(func(ctx context.Context, ns types.NamespacedName, obj client.Object) (bool, error) {
-					switch o := obj.(type) {
-					case *appsv1.Deployment:
+					if o, ok := obj.(*appsv1.Deployment); ok {
 						deployment := testDeployment(controllerDeploymentAssetName)
 						deployment.Labels = nil
 						deployment.DeepCopyInto(o)
@@ -164,9 +164,8 @@ func TestCreateOrApplyDeployments(t *testing.T) {
 					return true, nil
 				})
 				m.UpdateWithRetryCalls(func(ctx context.Context, obj client.Object, _ ...client.UpdateOption) error {
-					switch obj.(type) {
-					case *appsv1.Deployment:
-						return commontest.TestClientError
+					if _, ok := obj.(*appsv1.Deployment); ok {
+						return commontest.ErrTestClient
 					}
 					return nil
 				})
@@ -177,16 +176,14 @@ func TestCreateOrApplyDeployments(t *testing.T) {
 			name: "deployment reconciliation with user custom config successful",
 			preReq: func(r *Reconciler, m *fakes.FakeCtrlClient, capturedDeployment **appsv1.Deployment) {
 				m.ExistsCalls(func(ctx context.Context, ns types.NamespacedName, obj client.Object) (bool, error) {
-					switch o := obj.(type) {
-					case *appsv1.Deployment:
+					if o, ok := obj.(*appsv1.Deployment); ok {
 						deployment := testDeployment(controllerDeploymentAssetName)
 						deployment.DeepCopyInto(o)
 					}
 					return true, nil
 				})
 				m.UpdateWithRetryCalls(func(ctx context.Context, obj client.Object, _ ...client.UpdateOption) error {
-					switch o := obj.(type) {
-					case *appsv1.Deployment:
+					if o, ok := obj.(*appsv1.Deployment); ok {
 						*capturedDeployment = o.DeepCopy()
 					}
 					return nil
@@ -202,7 +199,7 @@ func TestCreateOrApplyDeployments(t *testing.T) {
 										{
 											Key:      "node",
 											Operator: corev1.NodeSelectorOpIn,
-											Values:   []string{"test"},
+											Values:   []string{testAffinityValue},
 										},
 									},
 								},
@@ -217,7 +214,7 @@ func TestCreateOrApplyDeployments(t *testing.T) {
 										{
 											Key:      "test",
 											Operator: metav1.LabelSelectorOpIn,
-											Values:   []string{"test"},
+											Values:   []string{testAffinityValue},
 										},
 									},
 								},
@@ -235,7 +232,7 @@ func TestCreateOrApplyDeployments(t *testing.T) {
 											{
 												Key:      "test",
 												Operator: metav1.LabelSelectorOpIn,
-												Values:   []string{"test"},
+												Values:   []string{testAffinityValue},
 											},
 										},
 									},
@@ -290,7 +287,7 @@ func TestCreateOrApplyDeployments(t *testing.T) {
 						term.MatchExpressions[0].Key != "node" ||
 						term.MatchExpressions[0].Operator != corev1.NodeSelectorOpIn ||
 						len(term.MatchExpressions[0].Values) == 0 ||
-						term.MatchExpressions[0].Values[0] != "test" {
+						term.MatchExpressions[0].Values[0] != testAffinityValue {
 						t.Error("NodeAffinity match expressions should be configured correctly")
 					}
 				}
@@ -336,10 +333,8 @@ func TestCreateOrApplyDeployments(t *testing.T) {
 				// Validate NodeSelector
 				if podSpec.NodeSelector == nil {
 					t.Error("NodeSelector should be set")
-				} else {
-					if podSpec.NodeSelector["type"] != "test" {
-						t.Errorf("NodeSelector should have type=test, got: %v", podSpec.NodeSelector)
-					}
+				} else if podSpec.NodeSelector["type"] != "test" {
+					t.Errorf("NodeSelector should have type=test, got: %v", podSpec.NodeSelector)
 				}
 
 				// Validate Resources
@@ -370,15 +365,13 @@ func TestCreateOrApplyDeployments(t *testing.T) {
 			name: "deployment reconciliation fails while updating image in externalsecrets status",
 			preReq: func(r *Reconciler, m *fakes.FakeCtrlClient, capturedDeployment **appsv1.Deployment) {
 				m.ExistsCalls(func(ctx context.Context, ns types.NamespacedName, obj client.Object) (bool, error) {
-					switch obj.(type) {
-					case *appsv1.Deployment:
+					if _, ok := obj.(*appsv1.Deployment); ok {
 						return false, nil
 					}
 					return true, nil
 				})
 				m.CreateCalls(func(ctx context.Context, obj client.Object, opts ...client.CreateOption) error {
-					switch o := obj.(type) {
-					case *appsv1.Deployment:
+					if o, ok := obj.(*appsv1.Deployment); ok {
 						*capturedDeployment = o.DeepCopy()
 						deployment := testDeployment(controllerDeploymentAssetName)
 						deployment.DeepCopyInto(o)
@@ -386,9 +379,8 @@ func TestCreateOrApplyDeployments(t *testing.T) {
 					return nil
 				})
 				m.StatusUpdateCalls(func(ctx context.Context, obj client.Object, _ ...client.SubResourceUpdateOption) error {
-					switch obj.(type) {
-					case *v1alpha1.ExternalSecretsConfig:
-						return commontest.TestClientError
+					if _, ok := obj.(*v1alpha1.ExternalSecretsConfig); ok {
+						return commontest.ErrTestClient
 					}
 					return nil
 				})
@@ -399,8 +391,7 @@ func TestCreateOrApplyDeployments(t *testing.T) {
 			name: "deployment reconciliation with invalid toleration configuration",
 			preReq: func(r *Reconciler, m *fakes.FakeCtrlClient, capturedDeployment **appsv1.Deployment) {
 				m.ExistsCalls(func(ctx context.Context, ns types.NamespacedName, obj client.Object) (bool, error) {
-					switch o := obj.(type) {
-					case *appsv1.Deployment:
+					if o, ok := obj.(*appsv1.Deployment); ok {
 						deployment := testDeployment("external-secrets-controller")
 						deployment.DeepCopyInto(o)
 					}
@@ -422,8 +413,7 @@ func TestCreateOrApplyDeployments(t *testing.T) {
 			name: "deployment reconciliation with invalid nodeSelector configuration",
 			preReq: func(r *Reconciler, m *fakes.FakeCtrlClient, capturedDeployment **appsv1.Deployment) {
 				m.ExistsCalls(func(ctx context.Context, ns types.NamespacedName, obj client.Object) (bool, error) {
-					switch o := obj.(type) {
-					case *appsv1.Deployment:
+					if o, ok := obj.(*appsv1.Deployment); ok {
 						deployment := testDeployment(controllerDeploymentAssetName)
 						deployment.DeepCopyInto(o)
 					}
@@ -439,8 +429,7 @@ func TestCreateOrApplyDeployments(t *testing.T) {
 			name: "deployment reconciliation with invalid affinity configuration",
 			preReq: func(r *Reconciler, m *fakes.FakeCtrlClient, capturedDeployment **appsv1.Deployment) {
 				m.ExistsCalls(func(ctx context.Context, ns types.NamespacedName, obj client.Object) (bool, error) {
-					switch o := obj.(type) {
-					case *appsv1.Deployment:
+					if o, ok := obj.(*appsv1.Deployment); ok {
 						deployment := testDeployment("external-secrets-controller")
 						deployment.DeepCopyInto(o)
 					}
@@ -471,7 +460,7 @@ func TestCreateOrApplyDeployments(t *testing.T) {
 										{
 											Key:      "test",
 											Operator: metav1.LabelSelectorOpIn,
-											Values:   []string{"test"},
+											Values:   []string{testAffinityValue},
 										},
 									},
 								},
@@ -488,7 +477,7 @@ func TestCreateOrApplyDeployments(t *testing.T) {
 											{
 												Key:      "test",
 												Operator: metav1.LabelSelectorOpIn,
-												Values:   []string{"test"},
+												Values:   []string{testAffinityValue},
 											},
 										},
 									},
@@ -504,8 +493,7 @@ func TestCreateOrApplyDeployments(t *testing.T) {
 			name: "deployment reconciliation with invalid resource requirement configuration",
 			preReq: func(r *Reconciler, m *fakes.FakeCtrlClient, capturedDeployment **appsv1.Deployment) {
 				m.ExistsCalls(func(ctx context.Context, ns types.NamespacedName, obj client.Object) (bool, error) {
-					switch o := obj.(type) {
-					case *appsv1.Deployment:
+					if o, ok := obj.(*appsv1.Deployment); ok {
 						deployment := testDeployment(controllerDeploymentAssetName)
 						deployment.DeepCopyInto(o)
 					}
@@ -531,8 +519,7 @@ func TestCreateOrApplyDeployments(t *testing.T) {
 			name: "bitwarden is enabled with secretRef for certificates",
 			preReq: func(r *Reconciler, m *fakes.FakeCtrlClient, capturedDeployment **appsv1.Deployment) {
 				m.ExistsCalls(func(ctx context.Context, ns types.NamespacedName, obj client.Object) (bool, error) {
-					switch o := obj.(type) {
-					case *appsv1.Deployment:
+					if o, ok := obj.(*appsv1.Deployment); ok {
 						// Create a deployment with bitwarden-tls-certs volume to test volume update
 						deployment := testDeployment(bitwardenDeploymentAssetName)
 						deployment.Spec.Template.Spec.Volumes = []corev1.Volume{
@@ -550,8 +537,7 @@ func TestCreateOrApplyDeployments(t *testing.T) {
 					return true, nil
 				})
 				m.UpdateWithRetryCalls(func(ctx context.Context, obj client.Object, _ ...client.UpdateOption) error {
-					switch o := obj.(type) {
-					case *appsv1.Deployment:
+					if o, ok := obj.(*appsv1.Deployment); ok {
 						*capturedDeployment = o.DeepCopy()
 					}
 					return nil
@@ -600,7 +586,7 @@ func TestCreateOrApplyDeployments(t *testing.T) {
 				// Validate that bitwarden-sdk-server container image was updated
 				foundContainer := false
 				for _, container := range deployment.Spec.Template.Spec.Containers {
-					if container.Name == "bitwarden-sdk-server" {
+					if container.Name == bitwardenSDKServerContainerName {
 						foundContainer = true
 						if container.Image != commontest.TestBitwardenImageName {
 							t.Errorf("bitwarden-sdk-server container image should be %s, got: %s", commontest.TestBitwardenImageName, container.Image)
