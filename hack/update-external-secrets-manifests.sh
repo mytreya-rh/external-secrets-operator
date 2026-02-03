@@ -1,6 +1,8 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-set -e
+set -o nounset
+set -o pipefail
+set -o errexit
 
 EXTERNAL_SECRETS_VERSION=${1:?"missing external-secrets version. Please specify a version from https://github.com/external-secrets/external-secrets/releases"}
 MANIFESTS_PATH=./_output/manifests
@@ -29,7 +31,7 @@ bin/helm template external-secrets external-secrets/external-secrets -n external
 	--set certController.metrics.service.enabled=true \
 	>> ${MANIFESTS_PATH}/manifests.yaml
 
-echo "---- Patching manifest ----"
+echo "---- Patching external-secrets manifests ----"
 
 # remove non-essential fields from each resource manifests.
 ./bin/yq e 'del(.metadata.labels."helm.sh/chart")' -i ${MANIFESTS_PATH}/manifests.yaml
