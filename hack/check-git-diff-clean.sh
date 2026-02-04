@@ -6,7 +6,7 @@ set -o errexit
 
 # Ignore any expected automated changes like the timestamp update in clusterserviceversion file.
 ignore_expected_changes() {
-	csv_filename="bundle/manifests/external-secrets-operator.clusterserviceversion.yaml"
+	csv_filename="bundle/manifests/openshift-external-secrets-operator.clusterserviceversion.yaml"
 	if [[ -f "${csv_filename}" ]]; then
 		diff=$(git diff --no-ext-diff --unified=0 "${csv_filename}" 2>/dev/null | grep -E "^\+" | grep -Ev "createdAt|clusterserviceversion" || true)
 		if [[ -z "${diff}" ]]; then
