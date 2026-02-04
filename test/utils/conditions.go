@@ -96,7 +96,8 @@ func isPodReady(pod *corev1.Pod) bool {
 	return ready["Ready"] && ready["ContainersReady"]
 }
 
-// WaitForESOResourceReady checks if a custom ESO resource (like SecretStore/PushSecret) is Ready=True
+// WaitForESOResourceReady checks if a custom ESO resource (like SecretStore/PushSecret/ExternalSecret)
+// has Ready=True condition. These upstream external-secrets.io resources only have a "Ready" condition.
 func WaitForESOResourceReady(
 	ctx context.Context,
 	client dynamic.Interface,
@@ -134,6 +135,86 @@ func WaitForESOResourceReady(
 		}
 		return false, nil
 	})
+}
+
+// externalSecretsConfigGVR is the GroupVersionResource for ExternalSecretsConfig
+var externalSecretsConfigGVR = schema.GroupVersionResource{
+	Group:    "operator.openshift.io",
+	Version:  "v1alpha1",
+	Resource: "externalsecretsconfigs",
+}
+
+// WaitForExternalSecretsConfigReady waits for the ExternalSecretsConfig CR to have both Ready and Degraded
+// conditions present, with Ready=True and Degraded=False. This verifies that the operator has successfully
+// reconciled the configuration and is properly managing both conditions.
+// Returns early with error if Degraded=True.
+func WaitForExternalSecretsConfigReady(
+	ctx context.Context,
+	client dynamic.Interface,
+	name string,
+	timeout time.Duration,
+) error {
+	var lastReadyCondition, lastDegradedCondition map[string]interface{}
+
+	err := wait.PollUntilContextTimeout(ctx, 5*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
+		u, err := client.Resource(externalSecretsConfigGVR).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return false, nil // retry on not found or other errors
+		}
+
+		conds, found, err := unstructured.NestedSlice(u.Object, "status", "conditions")
+		if err != nil {
+			return false, fmt.Errorf("failed to extract conditions from ExternalSecretsConfig: %w", err)
+		}
+		if !found {
+			return false, nil // conditions not yet set, retry
+		}
+
+		for _, c := range conds {
+			cond, ok := c.(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			condType, _ := cond["type"].(string)
+			switch condType {
+			case "Ready":
+				lastReadyCondition = cond
+			case "Degraded":
+				lastDegradedCondition = cond
+			}
+		}
+
+		// Require both Ready and Degraded conditions to be present
+		if lastReadyCondition == nil || lastDegradedCondition == nil {
+			return false, nil // wait until both conditions are reported
+		}
+
+		// Fail fast if degraded
+		if lastDegradedCondition["status"] == "True" {
+			return false, fmt.Errorf("ExternalSecretsConfig %s is degraded: %v", name, lastDegradedCondition["message"])
+		}
+
+		return lastReadyCondition["status"] == "True", nil
+	})
+
+	// Provide detailed error message on timeout
+	if err != nil && wait.Interrupted(err) {
+		readyStatus := "not set"
+		degradedStatus := "not set"
+		if lastReadyCondition != nil {
+			readyStatus = fmt.Sprintf("%v (reason: %v, message: %v)",
+				lastReadyCondition["status"], lastReadyCondition["reason"], lastReadyCondition["message"])
+		}
+		if lastDegradedCondition != nil {
+			degradedStatus = fmt.Sprintf("%v (reason: %v, message: %v)",
+				lastDegradedCondition["status"], lastDegradedCondition["reason"], lastDegradedCondition["message"])
+		}
+		return fmt.Errorf("timeout waiting for ExternalSecretsConfig %s to be ready: Ready=%s, Degraded=%s",
+			name, readyStatus, degradedStatus)
+	}
+
+	return err
 }
 
 func fetchAWSCreds(ctx context.Context, k8sClient *kubernetes.Clientset) (string, string, error) {
