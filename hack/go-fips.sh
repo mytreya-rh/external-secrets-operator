@@ -6,7 +6,13 @@ set -o errexit
 
 GOFLAGS="${GOFLAGS:-}"
 
-if GOEXPERIMENT="strictfipsruntime" go build ./tools > /dev/null 2>&1 ; then
+# Test if the go compiler supports GOEXPERIMENT=strictfipsruntime by building a minimal program.
+# Using ./tools doesn't work as it contains only tool dependency imports that aren't buildable.
+fips_test_file=$(mktemp --suffix=.go)
+trap 'rm -f ${fips_test_file}' EXIT
+echo 'package main; func main(){}' > "${fips_test_file}"
+
+if GOEXPERIMENT="strictfipsruntime" go build -o /dev/null "${fips_test_file}" > /dev/null 2>&1 ; then
     echo "INFO: building with FIPS support"
 
     export GOEXPERIMENT="strictfipsruntime"
