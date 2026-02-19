@@ -317,8 +317,13 @@ func isCRDInstalled(config *rest.Config, name, groupVersion string) (bool, error
 	}
 
 	resources, err := discoveryClient.ServerPreferredResources()
-	if err != nil {
+	// ServerPreferredResources() may return a partial result along with an error (e.g., when some API groups are
+	// unavailable). Currently, any error causes an immediate return, potentially missing CRDs that were successfully discovered.
+	if err != nil && len(resources) == 0 {
 		return false, fmt.Errorf("failed to discover resources list: %w", err)
+	}
+	if err != nil {
+		ctrl.Log.V(1).WithName("crd-discovery").Info("ServerPreferredResources returned partial results", "error", err)
 	}
 
 	for _, resource := range resources {
