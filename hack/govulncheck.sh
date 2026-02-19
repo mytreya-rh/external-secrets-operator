@@ -27,7 +27,8 @@ set -o errexit
 # - https://pkg.go.dev/vuln/GO-2026-4340 - Handshake messages may be processed at the incorrect encryption level in crypto/tls
 # - https://pkg.go.dev/vuln/GO-2025-4175 - Improper application of excluded DNS name constraints when verifying wildcard names in crypto/x509
 # - https://pkg.go.dev/vuln/GO-2025-4155 - Excessive resource consumption when printing error string for host certificate validation in crypto/x509
-KNOWN_VULNS_PATTERN="GO-2025-3547|GO-2025-3521|GO-2025-4240|GO-2026-4341|GO-2026-4340|GO-2025-4175|GO-2025-4155"
+# - https://pkg.go.dev/vuln/GO-2026-4337 - During session resumption in crypto/tls, if the underlying Config has its ClientCAs or RootCAs fields mutated between the initial handshake and the resumed handshake, the resumed handshake may succeed when it should have failed.
+KNOWN_VULNS_PATTERN="GO-2025-3547|GO-2025-3521|GO-2025-4240|GO-2026-4341|GO-2026-4340|GO-2025-4175|GO-2025-4155|GO-2026-4337"
 
 GOVULNCHECK_BIN="${1:-}"
 OUTPUT_DIR="${2:-}"
