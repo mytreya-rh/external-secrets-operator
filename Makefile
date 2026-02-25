@@ -1,5 +1,5 @@
 # Project path.
-PROJECT_ROOT := $(shell git rev-parse --show-toplevel)
+PROJECT_ROOT := $(shell git rev-parse --show-toplevel 2>/dev/null || pwd)
 
 # Warn when an undefined variable is referenced, helping catch typos and missing definitions.
 MAKEFLAGS += --warn-undefined-variables
@@ -92,9 +92,24 @@ endif
 # tools. (i.e. podman)
 CONTAINER_TOOL ?= podman
 
-COMMIT ?= $(shell git rev-parse HEAD)
-SHORTCOMMIT ?= $(shell git rev-parse --short HEAD)
-GOBUILD_VERSION_ARGS = -ldflags "-X $(PACKAGE)/pkg/version.SHORTCOMMIT=$(SHORTCOMMIT) -X $(PACKAGE)/pkg/version.COMMIT=$(COMMIT)"
+# GO_PACKAGE is the Go module path (used for ldflags to embed version info).
+GO_PACKAGE ?= $(shell go list -m)
+
+# Version information for ldflags injection.
+SOURCE_GIT_COMMIT ?= $(shell git rev-parse HEAD 2>/dev/null)
+BUILD_DATE ?= $(shell date -u +'%Y-%m-%dT%H:%M:%SZ')
+
+# Extract major/minor from IMG_VERSION (e.g., 1.1.0 -> major=1, minor=1)
+IMG_VERSION_MAJOR = $(word 1,$(subst ., ,$(IMG_VERSION)))
+IMG_VERSION_MINOR = $(word 2,$(subst ., ,$(IMG_VERSION)))
+
+GOBUILD_VERSION_ARGS = -ldflags " \
+	-X $(GO_PACKAGE)/pkg/version.commitFromGit=$(SOURCE_GIT_COMMIT) \
+	-X $(GO_PACKAGE)/pkg/version.versionFromGit=v$(IMG_VERSION) \
+	-X $(GO_PACKAGE)/pkg/version.majorFromGit=$(IMG_VERSION_MAJOR) \
+	-X $(GO_PACKAGE)/pkg/version.minorFromGit=$(IMG_VERSION_MINOR) \
+	-X $(GO_PACKAGE)/pkg/version.buildDate=$(BUILD_DATE) \
+	"
 
 # Location to install dependencies to.
 LOCALBIN ?= $(PROJECT_ROOT)/bin

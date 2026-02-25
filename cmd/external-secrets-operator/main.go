@@ -45,6 +45,7 @@ import (
 	operatorv1alpha1 "github.com/openshift/external-secrets-operator/api/v1alpha1"
 	escontroller "github.com/openshift/external-secrets-operator/pkg/controller/external_secrets"
 	"github.com/openshift/external-secrets-operator/pkg/operator"
+	"github.com/openshift/external-secrets-operator/pkg/version"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -142,6 +143,8 @@ func main() {
 	logConfig := textlogger.NewConfig(textlogger.Verbosity(logLevel))
 	ctrl.SetLogger(textlogger.NewLogger(logConfig))
 
+	setupLog.Info("starting external-secrets-operator", "version", version.String())
+
 	if !enableHTTP2 {
 		// if the enable-http2 flag is false (the default), http/2 should be disabled
 		// due to its vulnerabilities.
@@ -159,7 +162,7 @@ func main() {
 
 	// Metrics endpoint is enabled in 'config/default/kustomization.yaml'. The Metrics options configure the server.
 	// More info:
-	// - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.0/pkg/metrics/server
+	// - https://pkg.go.dev/sigs.k8s.io/controller-runtime/pkg/metrics/server
 	// - https://book.kubebuilder.io/reference/metrics.html
 	metricsServerOptions := metricsserver.Options{
 		BindAddress: metricsAddr,
@@ -167,7 +170,7 @@ func main() {
 		// FilterProvider is used to protect the metrics endpoint with authn/authz.
 		// These configurations ensure that only authorized users and service accounts
 		// can access the metrics endpoint. The RBAC are configured in 'config/rbac/kustomization.yaml'. More info:
-		// https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.0/pkg/metrics/filters#WithAuthenticationAndAuthorization
+		// https://pkg.go.dev/sigs.k8s.io/controller-runtime/pkg/metrics/filters#WithAuthenticationAndAuthorization
 		FilterProvider: filters.WithAuthenticationAndAuthorization,
 	}
 
